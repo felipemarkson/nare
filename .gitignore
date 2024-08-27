@@ -1,0 +1,6 @@
+.vscode/*
+example
+objs/*.o
+a.out
+simple
+tcp
