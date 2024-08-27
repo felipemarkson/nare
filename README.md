@@ -64,10 +64,7 @@ void free_resources(void) {
 ```
 
 ## Licence
-
-Copyright 2024 Felipe Markson dos Santos Monteiro <fmarkson@outlook.com>
-
-All files under `src/` and `includes/` folders are subject to the terms of the Mozilla Public License, v. 2.0 as detailed in the headers of each file.
+**Nare** (files under `src/` and `includes/`) is licensed in the terms of the Mozilla Public License, v. 2.0, as detailed in the headers of each file.
 See `LICENSE` for more details.
 
 Other files are under Public Domain (CC0 1.0 Universal) License.
