@@ -1,6 +1,6 @@
 # Nare
 
-A low level asynchronous I/O library for Linux based on [io_uring](https://github.com/axboe/liburing).
+A low-level asynchronous I/O library for Linux based on [io_uring](https://github.com/axboe/liburing).
 
 ## Example as documentation
 
