@@ -1,6 +1,7 @@
 .vscode/*
 example
-objs/*.o
+objs/
 a.out
 simple
 tcp
+dist/*
