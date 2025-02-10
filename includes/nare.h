@@ -7,15 +7,16 @@
 
 #ifndef NARE_H
 #define NARE_H
+#include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/time.h>
 
 typedef struct Nare Nare;
 
 Nare* Nare_alloc(unsigned int cq_entries, unsigned int sq_entries);
 void Nare_free(Nare* nare);
-int Nare_loop(Nare* nare);
+int Nare_step(Nare* nare);
+size_t Nare_nactive(const Nare* nare) ;
 
 typedef void (*NareCB)(Nare* nare, ssize_t result, void* user_data);
 
@@ -39,7 +40,7 @@ int Nare_connect(Nare* nare, NareCB cb, void* user_data, int fd, const struct so
 
 /* MISC */
 
-int Nare_timeout(Nare* nare, NareCB cb, void* user_data, struct timespec* ts, unsigned int count);
+int Nare_timeout(Nare* nare, NareCB cb, void* user_data, struct timespec* ts);
 
 
 #endif

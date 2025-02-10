@@ -10,34 +10,80 @@
 #include <errno.h>            /* errno */
 #include <liburing.h>         /* All io_uring_* functions */
 #include <linux/time_types.h> /* struct __kernel_timespec */
-#include <stdlib.h>           /* calloc, free */
+#include <stddef.h>
+#include <stdio.h>
+#include <stdlib.h>           /* malloc, free */
+#include <string.h>
 
-struct NareState {
-    int used;
+typedef struct NareState {
     void* user_data;
     NareCB cb;
-};
+} NareState;
+
+typedef struct {
+    void** ptrs;
+    size_t size;
+    size_t cap;
+} NareStack;
+
+static int stack_init(NareStack* stack, size_t cap) {
+    stack->cap = cap;
+    stack->ptrs = malloc(sizeof(*stack->ptrs)*stack->cap); 
+    return stack->ptrs == NULL ? -1 : 0;
+}
+static void stack_deinit(NareStack* stack) {
+    free(stack->ptrs);
+    stack->ptrs = NULL;
+    stack->size = 0;
+    stack->cap = 0;
+}
+
+static int stack_push(NareStack* stack, void* elem) {
+    if (stack->size >= stack->cap)
+        return -1; // FULL
+    stack->ptrs[stack->size] = elem;
+    stack->size++;
+    return 0;
+}
+static void* stack_pop(NareStack* stack) {
+    if (stack->size == 0) return NULL; // EMPTY
+    void* out = stack->ptrs[stack->size - 1];
+    stack->size--;
+    return out;
+}
+
 
 struct Nare {
     struct io_uring ring;
     size_t nstates;
     size_t last_state;
-    struct NareState* states;
+    size_t nactive;
+    
+    // States Pool
+    NareState* states;
+    NareStack states_available;
 };
 
 Nare* Nare_alloc(unsigned int cq_entries, unsigned int sq_entries) {
     Nare* nare = NULL;
     int err = 0;
     struct io_uring_params params = {.cq_entries = cq_entries, .sq_entries = sq_entries};
-    if (cq_entries < sq_entries) {
-        errno = EINVAL;
+    nare = malloc(sizeof(*nare));
+    if (nare == NULL) goto error;
+    memset(nare, 0, sizeof(*nare));
+    nare->nstates = cq_entries + sq_entries;
+    nare->states = malloc(sizeof(*nare->states)*(nare->nstates));
+    if(nare->states == NULL) goto error;
+    memset(nare->states, 0, sizeof(*nare->states)*(nare->nstates));
+
+    if (stack_init(&nare->states_available, nare->nstates) < 0)
         goto error;
+
+    for (size_t i = nare->nstates; i > 0; i--) {
+        size_t j = i - 1;
+        stack_push(&nare->states_available, nare->states + j);
     }
 
-    nare = calloc(1, sizeof(*nare) + sizeof(struct NareState) * (cq_entries + sq_entries));
-    if (nare == NULL) goto error;
-    nare->nstates = cq_entries + sq_entries;
-    nare->states = (void*)((unsigned char*)nare + sizeof(*nare));
     err = io_uring_queue_init_params(sq_entries, &nare->ring, &params);
     if (err < 0) {
         errno = -err;
@@ -46,66 +92,58 @@ Nare* Nare_alloc(unsigned int cq_entries, unsigned int sq_entries) {
     return nare;
 
 error:
-    if (nare != NULL) free(nare);
+    if (nare != NULL)
+        Nare_free(nare);
     return NULL;
 }
 
 void Nare_free(Nare* nare) {
+    if (nare == NULL) return;
+
     io_uring_queue_exit(&nare->ring);
+    stack_deinit(&nare->states_available);
+    free(nare->states);
     free(nare);
 }
 
-static struct NareState* Nare_get_state(Nare* nare) {
-    for (size_t i = nare->last_state + 1; i < nare->nstates; i++) {
-        struct NareState* state = nare->states + i;
-        if (!(state->used)) {
-            state->used = -1;
-            nare->last_state = i;
-            return state;
-        }
-    }
-    for (size_t i = 0; i < nare->last_state + 1; i++) {
-        struct NareState* state = nare->states + i;
-        if (!(state->used)) {
-            state->used = -1;
-            nare->last_state = i;
-            return state;
-        }
-    }
-    return NULL;
+static NareState* Nare_get_state(Nare* nare) {
+    return stack_pop(&nare->states_available);;
 }
 
-static void Nare_release_state(struct NareState* state) {
-    state->cb = NULL;
-    state->used = 0;
-    state->user_data = NULL;
+static void Nare_release_state(Nare* nare, NareState* state) {
+    memset(state, 0, sizeof(*state));
+    stack_push(&nare->states_available, state);
 }
 
-int Nare_loop(Nare* nare) {
+size_t Nare_nactive(const Nare* nare) {
+    return nare->nactive;
+}
+
+int Nare_step(Nare* nare) {
     int ret = 0;
-    while (1) {
-        size_t count = 0;
-        unsigned head = 0;
-        struct io_uring_cqe* cqe = NULL;
-        ret = io_uring_submit_and_wait(&nare->ring, 1);
-        if (ret < 0) return ret;
-        io_uring_for_each_cqe(&nare->ring, head, cqe) {
-            ++count;
-            struct NareState* state = (void*)cqe->user_data;
-            void* user_data = state->user_data;
-            NareCB cb = state->cb;
-            Nare_release_state(state);
-            if (cb != NULL) cb(nare, cqe->res, user_data);
-        }
-        io_uring_cq_advance(&nare->ring, count);
+    size_t count = 0;
+    unsigned head = 0;
+    struct io_uring_cqe* cqe = NULL;
+    ret = io_uring_submit_and_wait(&nare->ring, 1);
+    if (ret < 0) return ret;
+    io_uring_for_each_cqe(&nare->ring, head, cqe) {
+        ++count;
+        struct NareState* state = (void*)cqe->user_data;
+        void* user_data = state->user_data;
+        NareCB cb = state->cb;
+        Nare_release_state(nare, state);
+        if (cb != NULL) cb(nare, cqe->res, user_data);
     }
+    io_uring_cq_advance(&nare->ring, count);
+    nare->nactive -= count;
+    return 0;
 }
 
 /* BASIC IO OPS*/
 
 #define NARE_OP_BOILERPLATE(io_uring_op, ...)                 \
     struct io_uring_sqe* sqe = io_uring_get_sqe(&nare->ring); \
-    struct NareState* result = NULL;                          \
+    NareState* result = NULL;                                 \
     if (sqe == NULL) return -1;                               \
                                                               \
     result = Nare_get_state(nare);                            \
@@ -115,6 +153,7 @@ int Nare_loop(Nare* nare) {
     result->cb = cb;                                          \
     result->user_data = user_data;                            \
     io_uring_sqe_set_data(sqe, result);                       \
+    nare->nactive++;                                          \
     return 0;
 
 int Nare_openat(Nare* nare, NareCB cb, void* user_data, int dir_fd, const char* path, int flags, mode_t mode) {
@@ -173,6 +212,6 @@ int Nare_connect(Nare* nare, NareCB cb, void* user_data, int fd, const struct so
 
 /* MISC */
 
-int Nare_timeout(Nare* nare, NareCB cb, void* user_data, struct timespec* ts, unsigned int count) {
-    NARE_OP_BOILERPLATE(io_uring_prep_timeout, (struct __kernel_timespec*)ts, count, 0);
+int Nare_timeout(Nare* nare, NareCB cb, void* user_data, struct timespec* ts) {
+    NARE_OP_BOILERPLATE(io_uring_prep_timeout, (struct __kernel_timespec*)ts,0 ,0);
 }

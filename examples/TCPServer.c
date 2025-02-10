@@ -1,3 +1,5 @@
+// WARNING: THIS EXAMPLE IS NOT WORKING AT MOMENT!!!!!!
+
 #include <errno.h>
 #include <signal.h>
 #include <stdio.h>

@@ -1,10 +1,3 @@
-# Nare
-
-A low-level asynchronous I/O library for Linux based on [io_uring](https://github.com/axboe/liburing).
-
-## Example as documentation
-
-``` C
 // cc simple.c -lnare -luring
 #include <nare.h>
 #define STDOUT_FD 1
@@ -51,11 +44,5 @@ void callback(Nare* nare, ssize_t result, void* user_data) {
        operations */
     *(int*)user_data += 1;
 }
-```
 
-## Licence
-**Nare** (files under `src/` and `includes/`) is licensed in the terms of the Mozilla Public License, v. 2.0, as detailed in the headers of each file.
-See `LICENSE` for more details.
 
-Other files are under Public Domain (CC0 1.0 Universal) License.
-See `LICENSE-CC0` for more details.

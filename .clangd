@@ -1,0 +1,9 @@
+CompileFlags:                           # Tweak the parse settings
+  Add:
+    - "-xc"
+    - "-Wall"
+    - "-Wextra"
+    - "-std=c99"
+    - "-Iincludes"
+    - "-D_POSIX_C_SOURCE=200809L"
+  Compiler: clang               # Change argv[0] of compile flags to `clang++`
